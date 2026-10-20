@@ -234,6 +234,7 @@ export async function handleRegistration({
   // 3. Redirect to the backend to initiate Paystack.
   onStatus?.("Redirecting to secure payment...");
 
+  // Redirecting url
 const paymentUrl = new URL(
   `/api/payment/${encodeURIComponent(registrationRef.id)}`,
   BACKEND_URL
