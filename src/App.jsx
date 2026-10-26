@@ -11,6 +11,7 @@ import ContactUS from "./pages/public/ContactUS";
 import Membership from "./pages/public/Membership";
 import MembershipSuccess from "./pages/public/MembershipSuccess";
 import AdminDashboard from "./pages/Admin/AdminDashboard";
+import MembershipVerification from "./pages/public/MembershipVerification";
 
 export default function App() {
   return (
@@ -24,6 +25,11 @@ export default function App() {
       <Route path="/membership" element={<Membership />} />
       <Route path="/membership-success" element={<MembershipSuccess />}/>
       <Route path="/admin" element={<AdminDashboard />} />
+
+<Route
+  path="/verify-membership"
+  element={<MembershipVerification />}
+/>
 
     </Routes>
   );
