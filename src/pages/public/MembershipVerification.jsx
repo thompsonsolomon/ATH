@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
 import { db } from "../../services/firebase";
 
 const formatDate = (timestamp) => {
@@ -14,10 +14,10 @@ const formatDate = (timestamp) => {
   return Number.isNaN(date.getTime())
     ? "Not available"
     : date.toLocaleDateString("en-NG", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      });
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
 };
 
 export default function MembershipVerification() {
@@ -27,60 +27,100 @@ export default function MembershipVerification() {
   const [member, setMember] = useState(null);
   const [status, setStatus] = useState("loading");
 
-  useEffect(() => {
-    let active = true;
 
-    async function verifyMembership() {
-      if (!registrationId) {
-        setStatus("invalid");
-        return;
-      }
+useEffect(() => {
+  let active = true;
 
-      try {
-        // The QR code's id must be the Firestore registration document ID.
-        const snapshot = await getDoc(
-          doc(db, "registrations", registrationId)
-        );
+  async function verifyMembership() {
+    console.log("QR registration ID:", registrationId);
 
-        if (!active) return;
-
-        if (!snapshot.exists()) {
-          setStatus("invalid");
-          return;
-        }
-
-        const data = snapshot.data();
-
-        // Only paid memberships are considered verified.
-        if (data.paymentStatus !== "paid") {
-          setMember(data);
-          setStatus("pending");
-          return;
-        }
-
-        setMember({
-          name: data.applicantName || data.applicant?.fullName || "Member",
-          membershipType: data.membershipType || "Member",
-          membershipId:
-            data.membershipId ||
-            `${String(data.categoryId || "MEM").toUpperCase()}-${registrationId.slice(-8).toUpperCase()}`,
-          categoryId: data.categoryId,
-          createdAt: data.createdAt,
-        });
-
-        setStatus("verified");
-      } catch (error) {
-        console.error("Membership verification failed:", error);
-        if (active) setStatus("error");
-      }
+    if (!registrationId) {
+      setStatus("invalid");
+      return;
     }
 
-    verifyMembership();
+    try {
+      // First, look up the Firestore document ID.
+      let snapshot = await getDoc(
+        doc(db, "registrations", registrationId)
+      );
 
-    return () => {
-      active = false;
-    };
-  }, [registrationId]);
+      // If the QR contains the membership ID, search by that field.
+      if (!snapshot.exists()) {
+        const membershipQuery = query(
+          collection(db, "registrations"),
+          where("membershipId", "==", registrationId),
+          limit(1)
+        );
+
+        const membershipResults = await getDocs(membershipQuery);
+
+        console.log("Membership ID matches:", membershipResults.size);
+
+        if (membershipResults.empty) {
+          if (active) setStatus("invalid");
+          return;
+        }
+
+        snapshot = membershipResults.docs[0];
+      }
+
+      if (!active) return;
+
+      const data = snapshot.data();
+
+      console.log("Firestore document ID:", snapshot.id);
+      console.log("Fetched member:", data);
+
+      // Your database stores payment details in both fields.
+      const paymentStatus = String(
+        data.payment?.status || data.paymentStatus || ""
+      ).toLowerCase();
+
+      setMember({
+        name:
+          data.name ||
+          data["business-name"] ||
+          data.applicantName ||
+          data.applicant?.fullName ||
+          "Member",
+
+        membershipType:
+          data.membershipType ||
+          data.type ||
+          data.categoryId ||
+          "Member",
+
+        certificateNumber:
+          data.certificateNumber ||
+          data.documents?.certificate?.certificateNumber ||
+          "",
+
+        email: data.email || "",
+        phone: data.phone || "",
+        address: data.address || "",
+        state: data.state || "",
+        lga: data.lga || "",
+        createdAt: data.createdAt,
+      });
+
+      if (paymentStatus === "paid") {
+        setStatus("verified");
+      } else {
+        setStatus("pending");
+      }
+    } catch (error) {
+      console.error("Membership verification failed:", error);
+      if (active) setStatus("error");
+    }
+  }
+
+  verifyMembership();
+
+  return () => {
+    active = false;
+  };
+}, [registrationId]);
 
   const isVerified = status === "verified";
 
@@ -118,14 +158,13 @@ export default function MembershipVerification() {
 
         <section className="overflow-hidden rounded-3xl border border-black/5 bg-white shadow-xl shadow-[#0b1d17]/5">
           <div
-            className={`px-6 py-5 text-white ${
-              isVerified
+            className={`px-6 py-5 text-white ${isVerified
                 ? "bg-[#176b43]"
                 : status === "pending" ||
-                    status === "loading"
+                  status === "loading"
                   ? "bg-[#8b6713]"
                   : "bg-[#a52d2d]"
-            }`}
+              }`}
           >
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/15 text-2xl">
@@ -178,11 +217,6 @@ export default function MembershipVerification() {
                 </div>
 
                 <div className="space-y-5">
-                  <Detail label="Membership ID" value={member.membershipId} />
-                  <Detail
-                    label="Membership Category"
-                    value={member.membershipType}
-                  />
                   <Detail
                     label="Registration Date"
                     value={formatDate(member.createdAt)}
@@ -274,9 +308,8 @@ function Detail({ label, value, green = false }) {
     <div className="flex items-start justify-between gap-4 border-b border-gray-100 pb-4">
       <span className="text-sm text-gray-500">{label}</span>
       <span
-        className={`max-w-[60%] break-words text-right text-sm font-semibold ${
-          green ? "text-[#176b43]" : "text-[#0b1d17]"
-        }`}
+        className={`max-w-[60%] break-words text-right text-sm font-semibold ${green ? "text-[#176b43]" : "text-[#0b1d17]"
+          }`}
       >
         {value || "Not available"}
       </span>

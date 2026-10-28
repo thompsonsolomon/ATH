@@ -1,6 +1,6 @@
 
 import { useEffect, useState } from "react";
-import {  doc, getDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { jsPDF } from "jspdf";
 import QRCode from "qrcode";
 import { db } from "../../services/firebase";
@@ -187,13 +187,25 @@ export default function MembershipSuccess() {
     }
   }
 
+
+  console.log(registration)
+
   async function downloadFarmerIdCard() {
     if (!registration || registration.categoryId !== "farmer") return;
 
     setDownloading("id");
 
     try {
-      const name = getApplicantName(registration.applicant);
+      const name =
+        registration.name ||
+        registration["business-name"] ||
+        getApplicantName(registration.applicant);
+
+      const memberId =
+        registration.membershipId ||
+        registration.documents?.farmerIdCard?.membershipId ||
+        membershipId;
+
       const pdf = new jsPDF({
         orientation: "landscape",
         unit: "mm",
@@ -202,70 +214,184 @@ export default function MembershipSuccess() {
 
       const width = 86;
       const height = 54;
+
       const verificationUrl = new URL(
-        "/verify-membership.html",
+        "/verify-membership",
         window.location.origin
       );
-      verificationUrl.searchParams.set("id", membershipId);
 
-      const qrCode = await QRCode.toDataURL(verificationUrl.toString(), {
-        width: 300,
-        margin: 1,
-      });
+      // Use the actual Firestore document ID for verification.
+      verificationUrl.searchParams.set("id", registrationId);
 
-      pdf.setFillColor(11, 29, 23);
-      pdf.rect(0, 0, width, height, "F");
-
-      pdf.setFillColor(217, 182, 72);
-      pdf.rect(0, 0, width, 10, "F");
-
-      pdf.setTextColor(11, 29, 23);
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(7.5);
-      pdf.text("AGRO TRADE HUB AFRICA", 4, 6.5);
-
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFontSize(9);
-      pdf.text("FARMER MEMBERSHIP CARD", 4, 17);
-
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(6.5);
-      pdf.text("MEMBER NAME", 4, 24);
-
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(9);
-      pdf.text(name, 4, 29, { maxWidth: 53 });
-
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(6.5);
-      pdf.text("MEMBERSHIP ID", 4, 37);
-
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(8);
-      pdf.text(membershipId, 4, 42);
-
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(6);
-      pdf.text(
-        `Issued: ${new Date().toLocaleDateString("en-NG")}`,
-        4,
-        48
+      const qrCode = await QRCode.toDataURL(
+        verificationUrl.toString(),
+        {
+          width: 300,
+          margin: 1,
+          errorCorrectionLevel: "H",
+        }
       );
 
-      pdf.addImage(qrCode, "PNG", 62, 17, 19, 19);
+      // Card background
+      pdf.setFillColor(244, 247, 241);
+      pdf.rect(0, 0, width, height, "F");
 
-      pdf.setTextColor(217, 182, 72);
-      pdf.setFontSize(5.5);
-      pdf.text("SCAN TO VERIFY", 71.5, 39, { align: "center" });
+      // Dark green header
+      pdf.setFillColor(11, 61, 51);
+      pdf.rect(0, 0, width, 12, "F");
 
-      pdf.save(`ATH-Farmer-ID-${membershipId}.pdf`);
+      // Organisation name
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(10);
+      pdf.setTextColor(200, 234, 128);
+      pdf.text("AGRO TRADE HUB AFRICA", width / 2, 5.2, {
+        align: "center",
+      });
+
+      // Card title
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.setTextColor(255, 255, 255);
+      pdf.text("OFFICIAL FARMER MEMBERSHIP ID", width / 2, 9.3, {
+        align: "center",
+      });
+
+      // Photo area
+      const photoX = 4;
+      const photoY = 17;
+      const photoW = 22;
+      const photoH = 25;
+
+      pdf.setFillColor(222, 232, 225);
+      pdf.rect(photoX, photoY, photoW, photoH, "F");
+
+      // Use a saved applicant photo if one exists.
+      const photoUrl =
+        registration.applicant?.["passport-photo"]?.[0]?.url ||
+        registration.applicant?.passportPhoto?.[0]?.url ||
+        registration.photoURL ||
+        registration.passportPhotoUrl ||
+        registration.passportPhoto ||
+        registration["passport-photo"]?.[0]?.url ||
+        registration.documents?.passportPhoto?.url ||
+        "";
+
+      let photoAdded = false;
+
+      if (typeof photoUrl === "string" && photoUrl.startsWith("http")) {
+        try {
+          const response = await fetch(photoUrl);
+
+          if (!response.ok) {
+            throw new Error("Could not load member photo");
+          }
+
+          const blob = await response.blob();
+
+          const photoData = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+
+          const format = String(photoData).startsWith("data:image/png")
+            ? "PNG"
+            : "JPEG";
+
+          pdf.addImage(
+            photoData,
+            format,
+            photoX,
+            photoY,
+            photoW,
+            photoH,
+            undefined,
+            "FAST"
+          );
+
+          photoAdded = true;
+        } catch (photoError) {
+          console.warn("Member photo could not be loaded:", photoError);
+        }
+      }
+
+      // Fallback when no photo is saved or the image cannot load.
+      if (!photoAdded) {
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(6);
+        pdf.setTextColor(79, 99, 87);
+        pdf.text("PHOTO", photoX + photoW / 2, photoY + photoH / 2, {
+          align: "center",
+        });
+      }
+
+      // Member name
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(9);
+      pdf.setTextColor(11, 61, 51);
+
+      pdf.text(name.toUpperCase(), 30, 19.8, {
+        maxWidth: 51,
+      });
+
+      // Membership category
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(32, 148, 107);
+      pdf.text("FARMER MEMBER", 30, 25.8);
+
+      // Membership ID label
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(6.3);
+      pdf.setTextColor(79, 79, 79);
+      pdf.text("MEMBERSHIP ID", 30, 31.3);
+
+      // Actual membership ID from Firestore
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7.2);
+      pdf.setTextColor(11, 29, 23);
+      pdf.text(memberId, 30, 35.2, {
+        maxWidth: 34,
+      });
+
+      // State
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(6.3);
+      pdf.setTextColor(79, 79, 79);
+      pdf.text("STATE", 30, 41);
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.setTextColor(11, 29, 23);
+      pdf.text(registration.applicant.state || "N/A", 40, 41);
+
+      // QR code on the right
+      pdf.addImage(qrCode, "PNG", 66, 23, 15, 15);
+
+      // Footer
+      pdf.setFillColor(11, 61, 51);
+      pdf.rect(0, 47, width, 7, "F");
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(5.8);
+      pdf.setTextColor(255, 255, 255);
+
+      pdf.text(
+        "Registered Farmer Member • Agro Trade Hub Africa",
+        width / 2,
+        51.3,
+        { align: "center" }
+      );
+
+      pdf.save(`ATH-Farmer-ID-${memberId}.pdf`);
     } catch (err) {
+      console.error("Farmer ID generation failed:", err);
       alert("Could not generate the ID card. Please try again.");
-      console.error(err);
     } finally {
       setDownloading("");
     }
   }
+
 
   if (loading) {
     return (
